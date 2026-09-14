@@ -18,6 +18,9 @@ airflow/airflow.db
 airflow/airflow.cfg
 airflow/webserver_config.py
 
+# Stray dbt logs (when dbt is run from project root instead of retail_gold/)
+logs/
+
 # dbt
 retail_gold/target/
 retail_gold/dbt_packages/
@@ -29,8 +32,8 @@ terraform/*.tfstate
 terraform/*.tfstate.backup
 
 # Data files (don't commit raw datasets)
-data/*.csv
-data/*.parquet
+data/**/*.csv
+data/**/*.parquet
 !data/.gitkeep
 
 # OS
