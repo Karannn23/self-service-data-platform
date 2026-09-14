@@ -27,7 +27,6 @@ dbt/logs/
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
-terraform/.terraform.lock.hcl
 
 # Data files (don't commit raw datasets)
 data/*.csv
