@@ -19,9 +19,9 @@ airflow/airflow.cfg
 airflow/webserver_config.py
 
 # dbt
-dbt/target/
-dbt/dbt_packages/
-dbt/logs/
+retail_gold/target/
+retail_gold/dbt_packages/
+retail_gold/logs/
 
 # Terraform
 terraform/.terraform/
