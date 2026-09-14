@@ -2,9 +2,9 @@
 
 ## The problem
 
-Business stakeholders regularly need answers from data (e.g., "how are we doing in a product category," "what are our top products") but every question currently requires an engineer to translate it into a query. This is slow and doesn't scale, and it's the same bottleneck I handle at IBM day to day, translating stakeholder requests into governed data outputs.
+I noticed a pattern in my own job: business stakeholders constantly need answers from data (how's a product category doing, what are our top sellers), and every single time, someone on the data team has to translate that into a query. It works, but it doesn't scale, and it means the same routine questions keep eating engineering time.
 
-This project builds a small, real version of that platform: automated ingestion, validated and governed data, tested business logic, and a safe, boundary-scoped tool layer designed to let a natural-language agent answer questions directly, without risking an incorrect or ungoverned answer.
+So I built a small, real version of a platform that could fix that: data that's ingested automatically, cleaned and validated before anyone sees it, business logic that's tested rather than trusted, and a safe query layer designed to let a natural-language agent answer questions directly, without ever guessing at a number it can't back up.
 
 ## Architecture
 
@@ -17,13 +17,13 @@ Simulated live order events (replayed via Kafka)
         ↓
    Airflow (batch orchestration)      Kafka (streaming ingestion)
         ↓                                    ↓
-   Databricks Free Edition — Bronze (raw landing, Unity Catalog schema: bronze)
+   Databricks Free Edition: Bronze (raw landing, Unity Catalog schema: bronze)
         ↓
-   Silver (cleaned, validated, deduplicated — Unity Catalog schema: silver)
+   Silver (cleaned, validated, deduplicated; Unity Catalog schema: silver)
         ↓
-   Gold (business aggregates, Unity Catalog schema: gold) — built and tested via dbt
+   Gold (business aggregates, Unity Catalog schema: gold), built and tested via dbt
         ↓
-   MCP tool server — safe, parameterized queries against Gold only,
+   MCP tool server: safe, parameterized queries against Gold only,
    designed for natural-language agent access
 ```
 
@@ -31,56 +31,53 @@ Infrastructure (one Azure resource group + storage account) provisioned via Terr
 
 ## Data sources
 
-- **Orders & order items** (CSV) — [Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce), real anonymized commercial data, ~99k orders, 2016–2018. Licensed CC-BY-NC-SA-4.0 (non-commercial), appropriate for this portfolio project.
-- **Products** (converted to Parquet) — same dataset's product catalog, used as slower-changing dimension/reference data
-- **Streaming order events** — simulated by replaying historical order data through Kafka at an accelerated pace (this is historical data, not a live production feed — noted here for transparency)
+- **Orders & order items** (CSV): from the [Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Real, anonymized commercial data, about 99k orders from 2016 to 2018. It's licensed CC-BY-NC-SA-4.0 (non-commercial), which fits fine for a portfolio project like this.
+- **Products** (converted to Parquet): the same dataset's product catalog. I used this as reference data that doesn't change often, which is exactly the kind of thing Parquet's columnar format suits well.
+- **Streaming order events**: I don't have a real live feed to pull from, so I replay the historical order data through Kafka at an accelerated pace to simulate one. Worth being upfront about that, it's not a live production stream, just an honest way to demo the streaming architecture.
 
 ## Status: core platform complete
 
 - [x] Batch ingestion (Airflow: CSV + Parquet → Bronze)
 - [x] Streaming ingestion (Kafka producer, replaying real order data)
-- [x] Data quality gates (Bronze → Silver) — see "What I found" below
+- [x] Data quality gates (Bronze to Silver), see "What I found" below
 - [x] Gold layer + dbt models (2 tested models, 7 passing tests)
 - [x] Real Bronze/Silver/Gold Unity Catalog schema separation
 - [x] Terraform infrastructure (Azure resource group + storage account)
 - [x] MCP tool layer for natural-language access, with guardrail tests
-- [ ] Flink real-time anomaly detection — **attempted, descoped** (see below)
 
-## What I found while building this
+## Things I actually ran into while building this
 
-**A false-positive in my own data quality check.** Early in the Silver layer, a duplicate-detection rule flagged 7,088 "duplicate" order/product combinations. Investigating before quarantining them, I found they were legitimate multi-unit orders (a customer ordering 2+ of the same product), not errors — the check needed a third key (`order_item_id`) to distinguish real duplicates from valid multi-line orders. Fixed the check rather than the data. This mirrors a real fan-out issue I've caught in production: validating your validation logic, not just trusting the first rule you write.
+**I caught a false-positive in my own data quality check.** Early on in the Silver layer, a duplicate-detection rule I'd written flagged 7,088 "duplicate" order/product combinations. Before I just quarantined them, I went and looked at an actual example, and it turned out they were completely legitimate, a customer ordering two of the same product in one order. My check needed a third key (`order_item_id`) to tell real duplicates apart from valid multi-line orders, so I fixed the check instead of touching the data. It's a small thing, but it's the same lesson behind a real fan-out bug I've caught at work: validate your validation logic too, don't just trust the first rule you write.
 
-**A SQL injection test against the MCP tool layer.** Passed a malicious payload (`'; DROP TABLE ...; --`) as a query parameter to confirm the parameterized-query pattern neutralizes it — returned an empty result with no error and no damage to the table. This is the concrete proof behind the tool layer's safety design, not just an assumption.
+**I actually tested whether my MCP tool layer was safe, instead of assuming it.** I passed a classic SQL injection payload (`'; DROP TABLE ...; --`) into one of the query tools to see what would happen. Because the query uses proper parameterization, it came back as an empty result, no error, and the table was completely untouched. That's the real proof behind the "this tool layer is safe" claim, not just something I believed because it seemed right.
 
-**Flink was descoped after hitting a genuine platform limitation.** PyFlink's Python UDF execution relies on spawning a subprocess (via Apache Beam's portability framework), which has known reliability issues on Windows — confirmed by a "process died with exit code 0" failure after resolving several other setup issues (JAR loading, API version differences). Rather than build a custom Docker image to route around a Windows-specific limitation, I made a scoping call to close out the project with the working components rather than over-invest in one platform-specific rough edge. The Kafka producer built for this (`kafka/producer.py`) works correctly and remains part of the platform.
-
-**A real dependency conflict, tested rather than assumed.** Installing PyFlink downgraded `protobuf` to a version `dbt-core` explicitly flags as incompatible. Rather than assume this broke things, I re-ran the actual dbt build and test suite — everything passed identically to before, confirming the conflict didn't affect this project's actual usage pattern. (This risk assessment is itself worth noting: declared dependency conflicts don't always translate to runtime breakage — worth testing, not assuming.)
+**I hit a real dependency conflict, and tested it rather than panicking.** At one point, installing another tool during development downgraded `protobuf` to a version `dbt-core` explicitly says it doesn't support. Rather than assume everything was now broken, I went back and re-ran my actual dbt build and test suite, everything passed exactly like before. Turned out the conflict didn't touch anything I was actually using. Worth remembering: a declared dependency conflict doesn't always mean something's actually broken, it's worth checking before you panic and start reworking your environment.
 
 ## Why each tool
 
-- **Airflow**: orchestrates scheduled batch ingestion of CSV and Parquet sources into Bronze
-- **Kafka**: streaming ingestion layer, simulates a live order feed from historical data
-- **Databricks + PySpark + Delta Lake**: transformation, storage, and governance — real Unity Catalog schema separation (bronze/silver/gold), not just naming conventions
-- **dbt**: version-controlled, tested, documented business logic for the Gold layer (2 models, 7 tests)
-- **Terraform**: infrastructure as code — a real Azure resource group and storage account, provisioned and verified
-- **MCP tool server**: exposes safe, boundary-scoped query tools against Gold data only, using parameterized queries (tested against SQL injection) so an agent can only run pre-validated query patterns, never arbitrary SQL against raw data
+- **Airflow**: schedules the batch pipeline that pulls CSV and Parquet sources into Bronze
+- **Kafka**: the streaming ingestion layer, simulating a live order feed off historical data
+- **Databricks + PySpark + Delta Lake**: where the real transformation, storage, and governance happens, including actual Unity Catalog schema separation (bronze/silver/gold), not just naming conventions pretending to be one
+- **dbt**: gives the Gold layer's business logic real tests and documentation instead of leaving it buried in a notebook (2 models, 7 passing tests)
+- **Terraform**: provisions the one piece of real cloud infrastructure (an Azure resource group and storage account) as code instead of clicking through the portal
+- **MCP tool server**: exposes a handful of safe, parameterized query tools against Gold data only, tested against SQL injection, so an agent can only ever run pre-approved query patterns, never arbitrary SQL against raw data
 
 ## Agent integration
 
-The MCP tool server (`mcp_agent/gold_data_server.py`) exposes three tools: `get_sales_by_category`, `get_top_categories`, and `get_top_products`. It is built and fully tested standalone — live integration with the Claude Agent SDK is documented conceptually below rather than run continuously, to keep this project at zero ongoing API cost.
+The MCP tool server (`mcp_agent/gold_data_server.py`) exposes three tools: `get_sales_by_category`, `get_top_categories`, and `get_top_products`. It's built and fully tested on its own. I haven't wired it up to live Claude API calls though, that would mean ongoing API cost, and I wanted to keep this whole project free. So instead, here's how it's actually meant to be used, worked through by hand:
 
-**Example conversation (hand-constructed, illustrating the intended flow):**
+**Here's roughly what a conversation with it would look like:**
 
 > **User:** "How is the beleza_saude category doing?"
-> **Agent:** _(calls `get_sales_by_category("beleza_saude")`)_
+> **Agent:** *(calls `get_sales_by_category("beleza_saude")`)*
 > **Tool result:** `{'category': 'beleza_saude', 'total_orders': 8836, 'total_revenue': 1258681.34, 'avg_item_price': 130.16}`
-> **Agent:** "beleza_saude is your top-performing category, with 8,836 orders and R$1,258,681 in total revenue — an average item price of R$130.16."
+> **Agent:** "beleza_saude is your top-performing category, with 8,836 orders and R$1,258,681 in total revenue, an average item price of R$130.16."
 
 > **User:** "What if I ask about a category that doesn't exist?"
 > **Tool result:** `[]`
-> **Agent:** "I don't have data for that category — could you check the name, or would you like to see the list of top categories instead?"
+> **Agent:** "I don't have data for that category, could you check the name, or would you like to see the list of top categories instead?"
 
-This second example is the deliberate reliability pattern: the tool returns an empty result rather than an error or a guessed answer, and the agent is expected to report that honestly rather than fabricate a number.
+That second example is the part I actually care about. The tool comes back empty instead of erroring or guessing, and the agent is expected to just say so honestly, rather than making up a plausible-sounding number.
 
 ## Setup
 
