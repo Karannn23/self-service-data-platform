@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: sales_by_category
+    description: "Total revenue, order count, and average item price per product category, built from validated Silver data."
+    columns:
+      - name: category
+        description: "Product category name"
+        tests:
+          - unique
+          - not_null
+      - name: total_revenue
+        description: "Sum of all line-item prices in this category"
+        tests:
+          - not_null
+      - name: avg_item_price
+        description: "Average price per line item in this category"
+        tests:
+          - not_null
+
+  - name: top_products
+    description: "Total revenue, order count, and average price per individual product."
+    columns:
+      - name: product_id
+        description: "Unique product identifier"
+        tests:
+          - unique
+          - not_null
+      - name: total_revenue
+        description: "Sum of all line-item prices for this product"
+        tests:
+          - not_null 
