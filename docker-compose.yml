@@ -71,28 +71,5 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  jobmanager:
-    image: flink:1.19-scala_2.12
-    ports:
-      - "8081:8081"
-    command: jobmanager
-    environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
-    volumes:
-      - ./flink/jars:/opt/flink/lib/extra
-      - ./flink:/opt/flink/usrlib
-
-  taskmanager:
-    image: flink:1.19.0-scala_2.12-java11-python3.10
-    depends_on:
-      - jobmanager
-    command: taskmanager
-    environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
-    scale: 1
-    volumes:
-      - ./flink/jars:/opt/flink/lib/extra
-      - ./flink:/opt/flink/usrlib           
-  
 volumes:
   postgres-db-volume:
